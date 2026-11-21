@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>local-agent-stack</groupId>
+    <artifactId>las-a2a-java-sdk</artifactId>
+    <version>1.0.0</version>
+    <packaging>jar</packaging>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+        <maven.compiler.release>22</maven.compiler.release>
+        <a2a.version>1.5.1.Final</a2a.version>
+        <jackson.version>2.17.2</jackson.version>
+    </properties>
+
+    <!-- 官方 A2A Java SDK BOM（1.5.1.Final）。必须 release 22：
+         spec 里的 AgentCard/Task/Message 都是 java.lang.Record（class major 61），
+         JDK 11 无法编译/加载。 -->
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.a2aproject.sdk</groupId>
+                <artifactId>a2a-java-sdk-bom</artifactId>
+                <version>${a2a.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <!-- 官方协议类型：AgentCard / Task / Message / AgentSkill / TaskStatus 等 -->
+        <dependency>
+            <groupId>org.a2aproject.sdk</groupId>
+            <artifactId>a2a-java-sdk-spec</artifactId>
+        </dependency>
+        <!-- 官方客户端门面：org.a2aproject.sdk.A2A.toUserMessage()/getAgentCard() -->
+        <dependency>
+            <groupId>org.a2aproject.sdk</groupId>
+            <artifactId>a2a-java-sdk-client</artifactId>
+        </dependency>
+        <!-- 把官方 record 序列化到 HTTP（标准库 HttpClient 不带 JSON 绑定） -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+                <configuration>
+                    <release>22</release>
+                    <encoding>UTF-8</encoding>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

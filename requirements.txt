@@ -1,0 +1,18 @@
+# local-agent-stack · Python 依赖（固定版本，禁止浮动）
+# 实测环境：Python 3.12.4 (C:\Miniconda3\python.exe)，安装于项目根 .venv
+# 版本决策见 services/mock-llm/README.md 与 sdk/python/README.md：
+#   a2a-sdk 1.x 删除 a2a.server.apps 且 types 改 protobuf；mcp 2.x 把 FastMCP 改名
+#   MCPServer 并蛇形化字段、mcp.server.fastmcp 直接抛异常 → 因 breaking change 固定为旧稳定版。
+#
+# 安装（清华镜像，原生 pypi.org 在本机很慢）：
+#   .\.venv\Scripts\python.exe -m pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
+
+# ---- 官方协议 SDK ----
+a2a-sdk[http-server]==0.3.26
+mcp==1.30.0
+
+# ---- HTTP 服务 / 客户端 / 数据校验 ----
+fastapi==0.115.6
+uvicorn==0.34.0
+httpx==0.28.1
+pydantic==2.11.3

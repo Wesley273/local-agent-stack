@@ -1,0 +1,200 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "local-agent-stack MCP 回放示例 API",
+    "version": "1.0.0",
+    "description": "用于 E18 验证：含 $ref / allOf / 嵌套对象 / 数组 / 循环引用 / path+query+body 参数"
+  },
+  "servers": [
+    { "url": "http://127.0.0.1:9200" }
+  ],
+  "paths": {
+    "/users/{id}": {
+      "get": {
+        "operationId": "getUserById",
+        "summary": "根据 ID 查询用户",
+        "description": "返回一个用户对象，用于验证 $ref 递归展开",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "用户 ID",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "verbose",
+            "in": "query",
+            "required": false,
+            "description": "是否展开详细信息",
+            "schema": { "type": "boolean" }
+          },
+          {
+            "name": "X-Trace-Id",
+            "in": "header",
+            "required": false,
+            "description": "链路追踪 ID",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "ignoredCookie",
+            "in": "cookie",
+            "required": false,
+            "schema": { "type": "string" }
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "deleteUser",
+        "summary": "删除用户（destructiveHint=true）",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ]
+      }
+    },
+    "/users": {
+      "post": {
+        "operationId": "createUser",
+        "summary": "创建用户",
+        "description": "requestBody 使用 allOf + $ref 合并，验证 SchemaResolver",
+        "parameters": [
+          { "name": "dryRun", "in": "query", "required": false, "schema": { "type": "boolean" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateUserRequest" }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "replaceUser",
+        "summary": "整体替换用户（idempotentHint=true）",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "user": { "$ref": "#/components/schemas/User" },
+                  "reason": { "type": "string", "description": "替换原因" }
+                },
+                "required": ["user"]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/pets": {
+      "patch": {
+        "operationId": "patchPet",
+        "summary": "局部更新宠物信息",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "tags": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "数组保留"
+                  },
+                  "attributes": {
+                    "type": "object",
+                    "properties": {
+                      "color": { "type": "string" },
+                      "weight": { "type": "number", "format": "double" }
+                    },
+                    "description": "嵌套对象保留"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "summary": "无 operationId，应进入 skipped[]",
+        "responses": { "200": { "description": "ok" } }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "无 operationId，应进入 skipped[]",
+        "responses": { "200": { "description": "UP" } }
+      },
+      "post": {
+        "description": "同样无 operationId，第二个 skipped[] 样本",
+        "responses": { "200": { "description": "ok" } }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "BaseUser": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "description": "姓名" },
+          "email": { "type": "string", "format": "email", "description": "邮箱" }
+        },
+        "required": ["name", "email"]
+      },
+      "Address": {
+        "type": "object",
+        "properties": {
+          "city": { "type": "string", "description": "城市" },
+          "street": { "type": "string" },
+          "zip": { "type": "string" },
+          "geo": {
+            "type": "object",
+            "properties": {
+              "lat": { "type": "number", "format": "double" },
+              "lng": { "type": "number", "format": "double" }
+            },
+            "description": "嵌套对象，展开后必须保留"
+          }
+        },
+        "required": ["city"]
+      },
+      "CreateUserRequest": {
+        "allOf": [
+          { "$ref": "#/components/schemas/BaseUser" },
+          {
+            "type": "object",
+            "properties": {
+              "address": { "$ref": "#/components/schemas/Address" },
+              "roles": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "数组 items 保留"
+              },
+              "age": { "type": "integer", "minimum": 0 }
+            },
+            "required": ["address"]
+          }
+        ]
+      },
+      "User": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "用户 ID" },
+          "name": { "type": "string" },
+          "address": { "$ref": "#/components/schemas/Address" },
+          "tags": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "manager": {
+            "$ref": "#/components/schemas/User",
+            "description": "自引用：验证防循环，不会栈溢出"
+          }
+        },
+        "required": ["id", "name"]
+      }
+    }
+  }
+}
