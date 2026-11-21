@@ -48,8 +48,10 @@ powershell -ExecutionPolicy Bypass -File scripts\stop-all.ps1
 | `docs/05-生产映射与差异.md` | 本地实现 vs 华为云生产系统的诚实对照 | — | — |
 | `docs/06-依赖与版本.md` | 三语言官方 SDK 精确坐标、实测 API、breaking change | — | — |
 | `docs/07-composite-filter-chain.md` | 单插件内责任链：共享解析结果、StopAndBuffer 状态机、Envoy 原生对比 | — | — |
+| `docs/08-aigateway-pipeline.md` | 端到端插件编排：异步护栏门闩、token 限流、指标、model 路由 | — | — |
 | `pkg/a2a/` | 共享库：协议类型、冒号路径解析、SSE/NDJSON、trace、过滤器链、护栏 Hook、限流 | Go | 标准库 |
 | `pkg/composite/` | 单插件内复合责任链：共享上下文、请求/响应一次 buffer+parse、Envoy 语义 decode/encode 顺序、SSE 安全追加帧 | Go | 标准库 |
+| `pkg/aigateway/` | AI 网关插件编排：model 提取路由、异步 input/output 护栏门闩、token 限流、指标 | Go | 标准库 |
 | `services/control-plane/` | Agent 注册中心、配置快照、CRUD、revision 热更新 | Java 11 | Jackson 2 |
 | `services/data-plane/` | 过滤器链、SSE 断流修复、模型网关、配置轮询、admin 端点 | Go | a2a-go/v2 |
 | `services/agentmecha/` | 官方 A2A Server/Client + 状态解耦 + 4 类护栏 Hook + NDJSON 64KB 修复 | Go | a2a-go/v2 |

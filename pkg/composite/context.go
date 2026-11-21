@@ -186,6 +186,14 @@ type Context struct {
 	appended [][]byte
 	appendMu sync.Mutex
 
+	// responseOverride lets a sub-filter REPLACE the current EncodeData chunk.
+	// nil = pass through; non-nil (including empty) = use override bytes.
+	// This is how a guardrail can withhold a rejected chunk while still
+	// appending an SSE error frame (data must not leak before the verdict).
+	respOverride    []byte
+	respOverrideSet bool
+	overrideMu      sync.Mutex
+
 	// ---- shared values between sub-filters ----
 	Values map[string]any
 
@@ -385,6 +393,29 @@ func (c *Context) AppendEncodedData(b []byte) {
 	c.appendMu.Unlock()
 }
 
+// ReplaceResponseData overrides the current EncodeData chunk. Pass an empty
+// (but non-nil) slice to withhold the chunk entirely while still appending
+// frames via AppendEncodedData.
+func (c *Context) ReplaceResponseData(b []byte) {
+	c.overrideMu.Lock()
+	defer c.overrideMu.Unlock()
+	c.respOverride = append([]byte(nil), b...)
+	c.respOverrideSet = true
+}
+
+// TakeResponseOverride returns the override and whether one was set.
+func (c *Context) TakeResponseOverride() ([]byte, bool) {
+	c.overrideMu.Lock()
+	defer c.overrideMu.Unlock()
+	if !c.respOverrideSet {
+		return nil, false
+	}
+	c.respOverrideSet = false
+	b := c.respOverride
+	c.respOverride = nil
+	return b, true
+}
+
 func (c *Context) TakeAppended() []byte {
 	c.appendMu.Lock()
 	defer c.appendMu.Unlock()
@@ -420,6 +451,9 @@ func (c *Context) Reset() {
 	c.responseParsed, c.responseJSON, c.responseErr = false, nil, nil
 	c.RejectCode, c.RejectReason, c.RejectDetail = "", "", nil
 	c.appended = nil
+	c.overrideMu.Lock()
+	c.respOverride, c.respOverrideSet = nil, false
+	c.overrideMu.Unlock()
 	c.Values = map[string]any{}
 	c.statsMu.Lock()
 	c.parseCount, c.bufferChunks = 0, 0

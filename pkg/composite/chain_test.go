@@ -260,6 +260,29 @@ func TestNonStreamResponseParsedOnce(t *testing.T) {
 	s.Close(ReasonNormal)
 }
 
+type OverrideFilter struct {
+	BaseFilter
+}
+
+func (f *OverrideFilter) Name() string { return "override" }
+func (f *OverrideFilter) EncodeData(c *Context, d []byte, end bool) Status {
+	c.ReplaceResponseData([]byte("replaced"))
+	return Continue
+}
+
+func TestResponseOverride(t *testing.T) {
+	chain := NewChain()
+	chain.Register("override", func() SubFilter { return &OverrideFilter{} })
+	ctx := ctxForTest()
+	s := chain.NewSession(ctx)
+	s.RunEncodeHeaders(NewHeaderMap(http.Header{"Content-Type": []string{"application/json"}}), false)
+	out, _ := s.RunEncodeData([]byte("original"), true)
+	if string(out) != "replaced" {
+		t.Fatalf("override failed, got %q", out)
+	}
+	s.Close(ReasonNormal)
+}
+
 func TestPoolReuse(t *testing.T) {
 	chain := NewChain()
 	chain.Register("A", func() SubFilter { return &TraceFilter{name: "A"} })

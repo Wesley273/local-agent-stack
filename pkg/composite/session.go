@@ -125,6 +125,10 @@ func (s *Session) RunEncodeData(data []byte, endStream bool) ([]byte, []byte) {
 			s.chain.warnf("[%s] StopAndBuffer in EncodeData unsupported", rs.insts[i].Name())
 		}
 	}
+	// A sub-filter (e.g. async guardrail) may withhold or replace the chunk.
+	if replaced, ok := ctx.TakeResponseOverride(); ok {
+		out = replaced
+	}
 	return out, ctx.TakeAppended()
 }
 
