@@ -38,14 +38,20 @@ func runRequest(t *testing.T, chain *composite.Chain, body, response string) (*c
 	t.Helper()
 	ctx := newCtx(body)
 	s := chain.NewSession(ctx)
-	reply, err := s.RunDecodeHeaders(false)
+	d0, err := s.RunDecodeHeaders(false)
 	if err != nil {
 		t.Fatalf("decode headers err: %v", err)
 	}
-	if reply == nil {
-		reply, err = s.RunDecodeData([]byte(body), true)
+	var reply *composite.Reply
+	if d0.Action == composite.FlowStopAndReply {
+		reply = d0.Reply
+	} else {
+		d1, err := s.RunDecodeData([]byte(body), true)
 		if err != nil {
 			t.Fatalf("decode data err: %v", err)
+		}
+		if d1.Action == composite.FlowStopAndReply {
+			reply = d1.Reply
 		}
 	}
 	h := composite.NewHeaderMap(http.Header{"Content-Type": []string{"application/json"}})

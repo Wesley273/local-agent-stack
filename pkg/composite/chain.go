@@ -121,113 +121,40 @@ func (c *Chain) releaseAll(rs *runState, ctx *Context, reason DestroyReason) {
 // Request path: DecodeHeaders + DecodeData with ONE-TIME buffer & parse
 // ---------------------------------------------------------------------------
 
-// RunDecodeHeaders executes DecodeHeaders in FORWARD order.
-//
-// If a sub-filter returns StopAndBuffer, the chain marks the start index and
-// stops iterating further headers. Callers should then feed body chunks via
-// RunDecodeData; the chain will accumulate until endStream, parse once, publish
-// to ctx, and resume the remaining sub-filters (including the buffering one).
+// RunDecodeHeaders is a compatibility wrapper around a fresh Session.
+// Deprecated: use Chain.NewSession(ctx).RunDecodeHeaders(...) so the same
+// sub-filter instances serve the whole stream AND so StopAndBuffer is
+// propagated to the caller via Decision.
 func (c *Chain) RunDecodeHeaders(ctx *Context, endStream bool) (*Reply, error) {
-	rs := c.acquireAll()
-	defer c.releaseAll(rs, ctx, ReasonNormal)
-
-	if ctx.MaxBody <= 0 {
-		ctx.MaxBody = c.maxBuffer
+	s := c.NewSession(ctx)
+	ctx.Set("_compat_session", s)
+	d, err := s.RunDecodeHeaders(endStream)
+	if d != nil && d.Action == FlowStopAndReply {
+		return d.Reply, err
 	}
-
-	for i, f := range rs.insts {
-		st := f.DecodeHeaders(ctx, endStream && !c.needsBodyProbe(rs.insts[i:]))
-		switch st {
-		case StopAndReply:
-			return c.makeReply(ctx), nil
-		case StopAndBuffer:
-			ctx.BeginRequestBodyBuffer()
-			ctx.Set("_buffer_from", i)
-			c.warnf("[%s] StopAndBuffer -> buffering request body, parse once, publish to ctx", f.Name())
-			// Envoy semantics: subsequent decode filters do not see headers yet.
-			return nil, nil
-		}
-	}
-	return nil, nil
+	return nil, err
 }
 
-// needsBodyProbe checks whether any remaining filter declared (via BaseFilter
-// override convention) interest in the body. We keep this simple: if any
-// remaining filter's DecodeData is non-trivial it will be called after headers.
-// This is only used to pass an accurate endStream hint to DecodeHeaders.
-func (c *Chain) needsBodyProbe(insts []SubFilter) bool {
-	return len(insts) > 0
-}
-
-// RunDecodeData feeds request body bytes through the chain.
-//
-// Two modes:
-//  1. Buffering mode (ctx.BodyState == BodyCollecting):
-//     - accumulate chunks until endStream
-//     - on the final chunk: parse ONCE, set ctx.BodyState=BodyParsed,
-//     publish ctx.Get("parsedBody"), then call DecodeData ONCE with the full
-//     body for every filter from the buffering index onward.
-//  2. Pass-through mode:
-//     - call DecodeData on every filter in forward order with the live chunk.
+// RunDecodeData is a compatibility wrapper around the Session created by
+// RunDecodeHeaders. Deprecated: use Session.RunDecodeData for the outer
+// FlowAction (FlowStopAndBuffer / FlowReady) needed by Envoy.
 func (c *Chain) RunDecodeData(ctx *Context, chunk []byte, endStream bool) (*Reply, error) {
-	rs := c.acquireAll()
-	defer c.releaseAll(rs, ctx, ReasonNormal)
-
-	if ctx.BodyState == BodyCollecting {
-		if err := ctx.AppendRequestChunk(chunk); err != nil {
-			ctx.Reject("INVALID_REQUEST", err.Error())
-			return c.makeReply(ctx), err
-		}
-		if !endStream {
-			return nil, nil
-		}
-		// Final chunk: parse exactly once and publish.
-		if err := ctx.FinishRequestBodyParse(); err != nil {
-			ctx.Reject("INVALID_REQUEST", err.Error())
-			return c.makeReply(ctx), err
-		}
-		ctx.BodyState = BodyParsed
-		ctx.Set("_buffer_released", true)
-
-		from := 0
-		if v, ok := ctx.Get("_buffer_from").(int); ok {
-			from = v
-		}
-		for i := from; i < len(rs.insts); i++ {
-			st := rs.insts[i].DecodeData(ctx, ctx.Body, true)
-			if st == StopAndReply {
-				return c.makeReply(ctx), nil
-			}
-			if st == StopAndBuffer {
-				c.warnf("[%s] nested StopAndBuffer after body parsed; treating as Continue", rs.insts[i].Name())
-			}
-		}
+	v := ctx.Get("_compat_session")
+	if v == nil {
 		return nil, nil
 	}
-
-	// Pass-through: no filter asked to buffer.
-	for _, f := range rs.insts {
-		st := f.DecodeData(ctx, chunk, endStream)
-		if st == StopAndReply {
-			return c.makeReply(ctx), nil
-		}
-		if st == StopAndBuffer {
-			// A filter requested buffering mid-stream: start collecting from
-			// the NEXT chunk (this chunk already passed earlier filters).
-			ctx.BeginRequestBodyBuffer()
-			_ = ctx.AppendRequestChunk(chunk)
-			ctx.Set("_buffer_from", 0)
-			c.warnf("[%s] StopAndBuffer in DecodeData -> collecting remaining chunks", f.Name())
-			if endStream {
-				if err := ctx.FinishRequestBodyParse(); err != nil {
-					ctx.Reject("INVALID_REQUEST", err.Error())
-					return c.makeReply(ctx), err
-				}
-				ctx.BodyState = BodyParsed
-			}
-		}
+	s, ok := v.(*Session)
+	if !ok {
+		return nil, nil
 	}
-	return nil, nil
+	d, err := s.RunDecodeData(chunk, endStream)
+	if d != nil && d.Action == FlowStopAndReply {
+		return d.Reply, err
+	}
+	if d != nil && d.Action == FlowReady {
+		s.Close(ReasonNormal)
+	}
+	return nil, err
 }
 
 // ---------------------------------------------------------------------------

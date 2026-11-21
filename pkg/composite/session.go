@@ -26,39 +26,82 @@ func (c *Chain) NewSession(ctx *Context) *Session {
 // Context returns the shared context for this stream.
 func (s *Session) Context() *Context { return s.ctx }
 
-// RunDecodeHeaders runs DecodeHeaders forward.
-func (s *Session) RunDecodeHeaders(endStream bool) (*Reply, error) {
+// FlowAction tells the OUTER Envoy Golang filter what to do. This is the piece
+// that was missing when everything lived in one plugin: the inner chain's
+// StopAndBuffer must be propagated to Envoy, otherwise Envoy keeps streaming
+// the body to the next filter / upstream while we are still buffering.
+type FlowAction int
+
+const (
+	FlowContinue      FlowAction = iota // Envoy: Continue
+	FlowStopAndBuffer                   // Envoy: StopIterationAndBuffer (still collecting body)
+	FlowStopAndReply                    // local reply; see Decision.Reply
+	FlowReady                           // body fully buffered+parsed, downstream filters ran -> release body
+)
+
+func (a FlowAction) String() string {
+	switch a {
+	case FlowContinue:
+		return "Continue"
+	case FlowStopAndBuffer:
+		return "StopAndBuffer"
+	case FlowStopAndReply:
+		return "StopAndReply"
+	case FlowReady:
+		return "Ready"
+	}
+	return "Unknown"
+}
+
+// Decision is the outer flow-control result of a decode phase.
+type Decision struct {
+	Action FlowAction
+	Reply  *Reply // non-nil only when Action == FlowStopAndReply
+	// ReleaseBody is the rewritten full body to inject downstream when Action
+	// == FlowReady (the composite buffered it). nil means "use original bytes".
+	ReleaseBody []byte
+}
+
+func errDecision(r *Reply, err error) (*Decision, error) {
+	return &Decision{Action: FlowStopAndReply, Reply: r}, err
+}
+
+// RunDecodeHeaders runs DecodeHeaders forward and PROPAGATES StopAndBuffer to
+// the caller so the outer Envoy filter can stop decoding.
+func (s *Session) RunDecodeHeaders(endStream bool) (*Decision, error) {
 	ctx, rs := s.ctx, s.rs
 	for i, f := range rs.insts {
 		st := f.DecodeHeaders(ctx, endStream)
 		switch st {
 		case StopAndReply:
-			return s.chain.makeReply(ctx), nil
+			return errDecision(s.chain.makeReply(ctx), nil)
 		case StopAndBuffer:
 			ctx.BeginRequestBodyBuffer()
 			ctx.Set("_buffer_from", i)
-			s.chain.warnf("[%s] StopAndBuffer -> buffer+parse once, publish to ctx", f.Name())
-			return nil, nil
+			s.chain.warnf("[%s] StopAndBuffer -> propagate FlowStopAndBuffer to Envoy", f.Name())
+			return &Decision{Action: FlowStopAndBuffer}, nil
 		}
 	}
-	return nil, nil
+	return &Decision{Action: FlowContinue}, nil
 }
 
-// RunDecodeData feeds request bytes. Handles the buffer/parse-once state machine.
-func (s *Session) RunDecodeData(chunk []byte, endStream bool) (*Reply, error) {
+// RunDecodeData feeds request bytes. Handles the buffer/parse-once state
+// machine and returns the correct outer FlowAction at every step.
+func (s *Session) RunDecodeData(chunk []byte, endStream bool) (*Decision, error) {
 	ctx, rs := s.ctx, s.rs
 
 	if ctx.BodyState == BodyCollecting {
 		if err := ctx.AppendRequestChunk(chunk); err != nil {
 			ctx.Reject("INVALID_REQUEST", err.Error())
-			return s.chain.makeReply(ctx), err
+			return errDecision(s.chain.makeReply(ctx), err)
 		}
 		if !endStream {
-			return nil, nil
+			// Still buffering: tell Envoy to keep stopping decoding.
+			return &Decision{Action: FlowStopAndBuffer}, nil
 		}
 		if err := ctx.FinishRequestBodyParse(); err != nil {
 			ctx.Reject("INVALID_REQUEST", err.Error())
-			return s.chain.makeReply(ctx), err
+			return errDecision(s.chain.makeReply(ctx), err)
 		}
 		ctx.Set("_buffer_released", true)
 		from := 0
@@ -68,28 +111,30 @@ func (s *Session) RunDecodeData(chunk []byte, endStream bool) (*Reply, error) {
 		for i := from; i < len(rs.insts); i++ {
 			st := rs.insts[i].DecodeData(ctx, ctx.Body, true)
 			if st == StopAndReply {
-				return s.chain.makeReply(ctx), nil
+				return errDecision(s.chain.makeReply(ctx), nil)
 			}
 		}
-		return nil, nil
+		// Buffered body is now parsed and published; release it downstream.
+		return &Decision{Action: FlowReady, ReleaseBody: append([]byte(nil), ctx.Body...)}, nil
 	}
 
 	for i, f := range rs.insts {
 		st := f.DecodeData(ctx, chunk, endStream)
 		switch st {
 		case StopAndReply:
-			return s.chain.makeReply(ctx), nil
+			return errDecision(s.chain.makeReply(ctx), nil)
 		case StopAndBuffer:
 			ctx.BeginRequestBodyBuffer()
 			_ = ctx.AppendRequestChunk(chunk)
 			ctx.Set("_buffer_from", i)
-			s.chain.warnf("[%s] StopAndBuffer in DecodeData -> collecting", f.Name())
+			s.chain.warnf("[%s] StopAndBuffer in DecodeData -> propagate FlowStopAndBuffer", f.Name())
 			if endStream {
 				_ = ctx.FinishRequestBodyParse()
 			}
+			return &Decision{Action: FlowStopAndBuffer}, nil
 		}
 	}
-	return nil, nil
+	return &Decision{Action: FlowContinue}, nil
 }
 
 // RunEncodeHeaders runs EncodeHeaders in REVERSE order.

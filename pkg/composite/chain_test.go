@@ -115,18 +115,31 @@ func TestStopAndBufferParseOnceAndShare(t *testing.T) {
 
 	ctx := ctxForTest()
 	s := chain.NewSession(ctx)
-	reply, err := s.RunDecodeHeaders(false)
-	if reply != nil || err != nil {
-		t.Fatalf("unexpected reply/err from headers: %v %v", reply, err)
+	d0, err := s.RunDecodeHeaders(false)
+	if err != nil {
+		t.Fatalf("headers err: %v", err)
+	}
+	// The INNER StopAndBuffer must be propagated OUT to Envoy.
+	if d0.Action != FlowStopAndBuffer {
+		t.Fatalf("headers decision want FlowStopAndBuffer, got %s", d0.Action)
 	}
 	if ctx.BodyState != BodyCollecting {
 		t.Fatalf("want BodyCollecting, got %s", ctx.BodyState)
 	}
-	_, _ = s.RunDecodeData([]byte(`{"prompt":"hel`), false)
+	d1, _ := s.RunDecodeData([]byte(`{"prompt":"hel`), false)
+	if d1.Action != FlowStopAndBuffer {
+		t.Fatalf("partial chunk decision want FlowStopAndBuffer, got %s", d1.Action)
+	}
 	if ctx.BodyParsed() {
 		t.Fatal("body must not be parsed before final chunk")
 	}
-	_, _ = s.RunDecodeData([]byte(`lo"}`), true)
+	d2, _ := s.RunDecodeData([]byte(`lo"}`), true)
+	if d2.Action != FlowReady {
+		t.Fatalf("final chunk decision want FlowReady, got %s", d2.Action)
+	}
+	if string(d2.ReleaseBody) != `{"prompt":"hello"}` {
+		t.Fatalf("released body mismatch: %s", d2.ReleaseBody)
+	}
 
 	if ctx.BodyState != BodyParsed || !ctx.BodyParsed() {
 		t.Fatalf("want BodyParsed, got %s", ctx.BodyState)
@@ -194,12 +207,12 @@ func TestStopAndReplyFromMiddleSkipsDownstream(t *testing.T) {
 
 	ctx := ctxForTest()
 	s := chain.NewSession(ctx)
-	reply, err := s.RunDecodeHeaders(true)
-	if err != nil || reply == nil {
-		t.Fatalf("expected local reply, got reply=%v err=%v", reply, err)
+	d, err := s.RunDecodeHeaders(true)
+	if err != nil || d.Action != FlowStopAndReply || d.Reply == nil {
+		t.Fatalf("expected FlowStopAndReply, got decision=%v err=%v", d, err)
 	}
-	if reply.Status != http.StatusUnauthorized {
-		t.Fatalf("want 401, got %d", reply.Status)
+	if d.Reply.Status != http.StatusUnauthorized {
+		t.Fatalf("want 401, got %d", d.Reply.Status)
 	}
 	if join(log) != "A.DH" {
 		t.Fatalf("C must be skipped after B local reply; got %s", join(log))

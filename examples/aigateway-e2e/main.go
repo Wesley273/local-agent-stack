@@ -41,20 +41,24 @@ func runOnce(chain *composite.Chain, label, body, response string, stream bool) 
 	defer s.Close(composite.ReasonNormal)
 
 	fmt.Println("  [decode] DH")
-	reply, err := s.RunDecodeHeaders(false)
+	d, err := s.RunDecodeHeaders(false)
 	if err != nil {
 		fmt.Println("  err:", err)
 	}
-	if reply != nil {
-		fmt.Printf("  [local-reply] status=%d body=%s\n", reply.Status, reply.Body)
+	fmt.Printf("  [outer] DH decision=%s\n", d.Action)
+	if d.Action == composite.FlowStopAndReply {
+		fmt.Printf("  [local-reply] status=%d body=%s\n", d.Reply.Status, d.Reply.Body)
 		return
 	}
-	// Feed body in two chunks to show buffer/parse happens once.
+	// Feed body in two chunks to show buffer/parse happens once and how the
+	// outer decision propagates StopAndBuffer to Envoy.
 	mid := len(body) / 2
-	_, _ = s.RunDecodeData([]byte(body[:mid]), false)
-	reply, _ = s.RunDecodeData([]byte(body[mid:]), true)
-	if reply != nil {
-		fmt.Printf("  [local-reply] status=%d body=%s\n", reply.Status, reply.Body)
+	d1, _ := s.RunDecodeData([]byte(body[:mid]), false)
+	fmt.Printf("  [outer] DD(chunk1) decision=%s\n", d1.Action)
+	d2, _ := s.RunDecodeData([]byte(body[mid:]), true)
+	fmt.Printf("  [outer] DD(chunk2,end) decision=%s releaseBytes=%d\n", d2.Action, len(d2.ReleaseBody))
+	if d2.Action == composite.FlowStopAndReply {
+		fmt.Printf("  [local-reply] status=%d body=%s\n", d2.Reply.Status, d2.Reply.Body)
 		return
 	}
 	fmt.Printf("  [decode] body parsed once: model=%q stats=%v\n",

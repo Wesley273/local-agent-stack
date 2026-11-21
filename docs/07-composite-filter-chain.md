@@ -202,7 +202,22 @@ return Continue // 绝不 StopAndReply / 不关连接 / 不写第二个状态
 | `filter.go` | `SubFilter` 接口 + `BaseFilter` 默认实现 |
 | `chain.go` | `Chain`（注册、pool stats、makeReply）+ 兼容旧式便捷方法 |
 | `session.go` | `Session`：绑定一个 stream 的 filter 实例，提供 5 个 phase 方法与 `Close` |
-| `chain_test.go` | 7 个单测：顺序、buffer/parse 一次并共享、缓存对象一致性、local reply 短路、流式追加帧、非流式响应解析、pool 复用 |
+| `chain_test.go` | 单测：顺序、buffer/parse 一次并共享、外层 Decision 序列（StopAndBuffer→Ready+ReleaseBody）、缓存对象一致性、local reply 短路、流式追加帧、非流式响应解析、响应改写、pool 复用 |
+| `adapter.md` | **外层 Decision → Envoy Golang filter 的映射**（StopAndBuffer 如何传播到 Envoy、ReleaseBody 如何注入 upstream） |
+
+### 外层 StopAndBuffer 传播（关键）
+
+内层 sub-filter 的 `StopAndBuffer` 必须传播到外层 Envoy，否则 Envoy 会继续把 body 发往 upstream，内层 buffer 就白攒了。
+`Session.RunDecodeHeaders/RunDecodeData` 返回 `*Decision`，其 `Action` 映射为 Envoy 状态：
+
+| Decision.Action | Envoy 返回值 |
+|---|---|
+| `FlowContinue` | `api.Continue` |
+| `FlowStopAndBuffer` | `api.StopAndBuffer`（停止 decode，body 不外发） |
+| `FlowStopAndReply` | `api.LocalReply` |
+| `FlowReady` | `api.Continue` + 将 `ReleaseBody` 写回 buffer 后再放行 |
+
+详见 [`pkg/composite/adapter.md`](../pkg/composite/adapter.md)。
 
 主要类型：
 
