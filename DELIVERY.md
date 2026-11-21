@@ -90,6 +90,7 @@ powershell -ExecutionPolicy Bypass -File scripts\stop-all.ps1
 - [`docs/04-API参考.md`](docs/04-API参考.md) — 全部端点
 - [`docs/05-生产映射与差异.md`](docs/05-生产映射与差异.md) — 本地实现 vs 华为云生产系统（诚实边界）
 - [`docs/06-依赖与版本.md`](docs/06-依赖与版本.md) — 官方 SDK 精确坐标、实测 API、breaking change
+- [`docs/07-composite-filter-chain.md`](docs/07-composite-filter-chain.md) — 单插件内责任链：一次 buffer/parse 共享、StopAndBuffer 状态机、SSE 安全追加帧
 
 ---
 
